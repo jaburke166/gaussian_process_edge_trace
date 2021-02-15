@@ -183,12 +183,10 @@ def cost_funct(grad_interp, edge):
     # Evaluate edge along interpolated gradient image 
     edge = edge[edge[:,0].argsort(), :]
     grad_score = grad_interp(edge)
-    #print(grad_score.max())
     
     # Compute cumulative sum of euclidean distance between pixel indexes of edge.
     # This is the equivalent of computing the curvilinear coordinates of the edge
     pixel_diff = np.cumsum(np.sqrt(np.sum(np.diff(edge, axis=0)**2, axis=1)))
-    #print((pixel_diff.min(), pixel_diff.max()))
                            
     # Compute line integral
     line_integral = 1/trapz(grad_score[:-1], pixel_diff)
