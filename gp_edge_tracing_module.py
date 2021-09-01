@@ -62,6 +62,7 @@ class GP_Edge_Tracing(object):
         
         # Set global internal parameters
         self.init = init
+        self.x_st, self.x_en = int(init[0,0]), int(init[-1,0])
         self.grad_img = grad_img
         self.noise_y = 100 * noise_y
         self.kernel_options = kernel_options
@@ -70,33 +71,38 @@ class GP_Edge_Tracing(object):
         self.seed = seed
         self.keep_ratio = keep_ratio
         self.score_thresh = score_thresh
-        self.delta_x = int(delta_x)
+        self.delta_x = int(delta_x) if delta_x > 3 else 3
         
-        # Set up gloabl internal parameters using inputs
-        self.size = self.grad_img.shape
+        # Set up gloabl internal parameters using inputs.
+        self.size = grad_img.shape
         self.M, self.N = self.size
-        self.x_grid = np.arange(int(init[1,0] - init[0,0] + 1)).astype(int)
-        self.N_subints = int(self.N // self.delta_x)
-        self.N_keep = int(self.keep_ratio*self.N_samples)
+        self.x_grid = self.x_st + np.arange(self.x_en - self.x_st + 1).astype(int)
+        self.edge_length = self.x_grid.shape[0]
+        self.N_subints = int(self.edge_length // delta_x)
+        self.N_keep = int(keep_ratio*N_samples)
         
         # Compute interpolated gradient surface and compute KDE of image gradient
         self.grad_kde = self.kernel_density_estimate(grad_img=True)
-        self.grad_interp = self.grad_interpolation(self.grad_img)
+        self.grad_interp = self.grad_interpolation(grad_img)
         
         # Set up check for kernel, function variance and length scale
         if type(self.kernel_options) == dict:
-            self.sigma_f = self.kernel_options['sigma_f']
-            self.sigma_l = self.kernel_options['length_scale']
-            self.kernel_type = self.kernel_options['kernel']
-            
+            self.sigma_f = kernel_options['sigma_f']
+            self.sigma_l = kernel_options['length_scale']
+            self.kernel_type = kernel_options['kernel']
+            self.kernel_nu = kernel_options['nu'] if kernel_options['kernel']=='Matern' else 2.5
         else:
-            rbf_matern, sigmaf_opt, sigmal_opt = self.kernel_options
+            rbf_matern, sigmaf_opt, sigmal_opt = kernel_options
 
             #rbf or matern
             if rbf_matern == 0:
                 self.kernel_type = 'RBF'
             else:
                 self.kernel_type = 'Matern'
+                if rbf_matern == 1:
+                    self.kernel_nu = 2.5
+                else:
+                    self.kernel_nu = 1.5
 
             # function variance
             if sigmaf_opt == 1:
@@ -168,7 +174,7 @@ class GP_Edge_Tracing(object):
         
         # Define kernel for GP
         if self.kernel_type == 'Matern':
-            kernel = constant_kernel * skgp.kernels.Matern(nu = 2.5, length_scale=self.sigma_l, 
+            kernel = constant_kernel * skgp.kernels.Matern(nu = self.kernel_nu, length_scale=self.sigma_l, 
                                                            length_scale_bounds=length_bounds) + white_kernel
         else:
             kernel = constant_kernel * skgp.kernels.RBF(length_scale=self.sigma_l, length_scale_bounds=length_bounds) + white_kernel
@@ -490,10 +496,9 @@ class GP_Edge_Tracing(object):
             best_pts_scores (array) : Array of pixel coordinates whose score surpasses the score threshold.
         '''
         # Bin thresholded pixel coordinates into sub-intervals of length delta_x
-        x_intervals = np.arange(0, self.x_grid.shape[0], self.delta_x)
-        x_visited = [[] for i in range(x_intervals.shape[0])]
-        bin_idx = np.floor(best_pts_scores[:,0]/self.delta_x).astype(int)
-
+        x_visited = (self.N_subints+1)*[[]]
+        bin_idx = np.floor((best_pts_scores[:,0]-self.x_st)/self.delta_x).astype(int)
+        
         # choose highest scoring pixel coordinate per sub-interval
         fobs_scores = []
         for idx, i in enumerate(np.unique(bin_idx)):
@@ -519,30 +524,16 @@ class GP_Edge_Tracing(object):
             best_curves (array) :  Optimal posterior curves from iteration stored in an array of 
             shape: (N, N_samples*keep_ratio, 2)
 
-            grad_kde (array) : KDE of image gradient.
-
-            score_thresh (float) : Float in [0,1] which decides on the threshold of accepting or rejecting candidate pixel 
-            coordinates
-
-            delta_x (int) : Stepsize to discretize the x-axis from [0, N] creating N//delta_x subintervals to bin the 
-            thresholded pixel coordinates.
-
-            size (tuple) : Size of image.
-
-            init (array) : Array containing the endpoints of the edge of interest (in xy-space).
-
             costs (array) : Costs of each of the optimal posterior curves.
         '''
         # Compute the density function representing the frequency distribution of optimal posterior curves exploring the image
         kde_arr = self.kernel_density_estimate(best_curves, costs)
-        x_st = self.init[0,0]
-        x_en = self.init[1,0]
 
         # Only store those pixel coordinates as candidates if their density is "reasonably" non-zero (it is set as 1e-4)
         # Also remove first and last columns since all egdes are pinned down to these points and will always have highest 
         # score.
         pixel_idx = np.argwhere(kde_arr > 1e-4)
-        pixel_idx = pixel_idx[(pixel_idx[:,1] != x_st) & (pixel_idx[:,1] != x_en)]
+        pixel_idx = pixel_idx[(pixel_idx[:,1] > self.x_st) & (pixel_idx[:,1] < self.x_en)]
 
         # Compute pixel score and threshold pixels using score_thresh
         best_pts_scores = self.comp_pixel_score(pixel_idx, kde_arr)
@@ -570,8 +561,8 @@ class GP_Edge_Tracing(object):
         fig, (ax1, ax2) = plt.subplots(2,1,figsize=(20,25))
         ax1.imshow(self.grad_img, cmap='gray')
         for i, curve in enumerate(iter_optimal_curves[:-1]):
-            ax1.plot(curve[:,1], '--', alpha=0.25, label='Iteration {}'.format(i+1))
-        ax1.plot(iter_optimal_curves[-1][:,1], '-', label='Final Edge')
+            ax1.plot(self.x_grid, curve[:,1], '--', alpha=0.25, label='Iteration {}'.format(i+1))
+        ax1.plot(self.x_grid, iter_optimal_curves[-1][:,1], '-', label='Final Edge')
         ax1.legend(loc='best', bbox_to_anchor=(1.05, 1.0))
         ax1.set_title('Most optimal curves of each iteration superimposed onto gradient image', fontsize=18)
 
@@ -581,6 +572,10 @@ class GP_Edge_Tracing(object):
         ax2.set_xlabel('Iteration', fontsize=15)
         ax2.set_ylabel('Cost', fontsize=15)
         ax2.set_xticks([i for i in range(1, N_iter+1)])
+        
+        fig.tight_layout()
+        plt.show()
+        plt.pause(0.5)
     
     
     
@@ -659,7 +654,7 @@ class GP_Edge_Tracing(object):
 
         # Measure time elapsed
         alg_st = t.time()
-
+        
         # Initialise the number of sub-intervals dividing the x-axis, the number of observations added to the Gaussian process
         # and the two lists storing the optimal curve and its cost in each iteration
         pre_fobs = self.obs
