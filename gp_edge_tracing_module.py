@@ -772,7 +772,8 @@ class GP_Edge_Tracing(object):
 
         # Compute and print time elapsed
         alg_en = t.time()
-#        print(f'Time elapsed before algorithm converged: {round(alg_en-alg_st, 3)}') # Commented out verbosity of algorithm
+        if verbose:
+            print(f'Time elapsed before algorithm converged: {round(alg_en-alg_st, 3)}') # Commented out verbosity of algorithm
 
         if self.return_std:
             return edge_trace, cred_interval
