@@ -519,14 +519,7 @@ class GP_Edge_Tracing(object):
         # Compute score for each pixel based on KDE's of image gradient and posterior curves. Concatenate best pixels and 
         # scores by thresholding scores. Ensure to switch columns of pixels to turn them from pixel-space (yx-space) to 
         # xy-space.
-        pixel_scores = 1/3 * (intersection_vals * grad_vals + intersection_vals + grad_vals) # score_fn 1
-#        pixel_scores = 1/2 * (grad_vals + intersection_vals) #score_fn 2
-#        pixel_scores = 1/2 * (grad_vals * intersection_vals + intersection_vals) # score_fn 3
-#        pixel_scores = 1/2 * (grad_vals * intersection_vals + grad_vals) # score_fn 4
-#        pixel_scores = 1/3 * (2*grad_vals + intersection_vals) # score_fn 5
-#        pixel_scores = 1/3 * (grad_vals + 2*intersection_vals) # score_fn 6
-#        pixel_scores = 1/4 * (2*grad_vals*intersection_vals + intersection_vals + grad_vals) # score_fn 7
-#        pixel_scores = 1/2 * (np.exp(1 - 1/grad_vals) + np.exp(1-1/intersection_vals)) # score_fn 8
+        pixel_scores = 1/3 * (intersection_vals * grad_vals + intersection_vals + grad_vals)
         
         best_scores = pixel_scores[pixel_scores > self.score_thresh].reshape(-1,1)
         best_pixels = pixel_idx[np.argwhere(pixel_scores > self.score_thresh)].reshape(-1,2)
