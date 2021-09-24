@@ -785,4 +785,3 @@ class GP_Edge_Tracing(object):
             return edge_trace, cred_interval
         else:
             return edge_trace
-       
