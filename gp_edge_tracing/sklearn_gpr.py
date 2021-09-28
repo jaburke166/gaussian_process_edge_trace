@@ -480,7 +480,8 @@ class GaussianProcessRegressor(MultiOutputMixin,
 
     
 ############################## KERNEL FOR OBSERVATION NOISE ##############################
-# Auhtor: David Tolpin   
+# Auhtor: David Tolpin  
+# Edited by Jamie Burke 
 
 class WeightedWhiteKernel(StationaryKernelMixin, Kernel):
     """Weighted white kernel.
@@ -575,6 +576,9 @@ class WeightedWhiteKernel(StationaryKernelMixin, Kernel):
         K_diag : array, shape (n_samples_X,)
             Diagonal of kernel k(X, X)
         """
+        # Rewrote the line below so that if size of the gram matrix, representing kernel K(X,X), has size equal
+        # to the length of the edge, then we're predicting at termination of the algorithm, so we don't corrupt
+        # any of the individual observations wiith noise.
         #predicted_weight = 1./(1./self.noise_weight).mean() if self.noise_weight != np.zeros_like(X)
         if X.shape[0] == self.edge_length:
             predicted_weight = 0
@@ -583,5 +587,4 @@ class WeightedWhiteKernel(StationaryKernelMixin, Kernel):
         return self.noise_level * np.full(X.shape[0], predicted_weight)
 
     def __repr__(self):
-        return "{0}(noise_level={1:.3g})".format(self.__class__.__name__,
-                                                 self.noise_level)
+        return f'{self.__class__.__name__}(noise_level={self.noise_level:.3g})'
