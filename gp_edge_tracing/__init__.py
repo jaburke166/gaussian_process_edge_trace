@@ -11,6 +11,5 @@ from .gpet import GP_Edge_Tracing
 from .sklearn_gpr import GaussianProcessRegressor
 from . import utils
 
-
 __all__ = ['GP_Edge_Tracing', 'GaussianProcessRegressor',
             'utils']
