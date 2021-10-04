@@ -15,8 +15,8 @@ import time as t
 import sklearn.gaussian_process as skgp
 import matplotlib.pyplot as plt
 
-from sklearn_gpr import GaussianProcessRegressor as GPR
-from sklearn_gpr import WeightedWhiteKernel
+from .sklearn_gpr import GaussianProcessRegressor as GPR
+from .sklearn_gpr import WeightedWhiteKernel
 from scipy.interpolate import LinearNDInterpolator
 from scipy.integrate import simps
 from KDEpy import FFTKDE
