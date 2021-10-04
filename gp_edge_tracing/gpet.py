@@ -672,7 +672,7 @@ class GP_Edge_Tracing(object):
     
     
     
-    def gpet(self, print_final_diagnostics=False, show_init_post=False, show_post_iter=False, verbose=False):
+    def __call__(self, print_final_diagnostics=False, show_init_post=False, show_post_iter=False, verbose=False):
         '''
         Outer function that runs the Gaussian process edge tracing algorithm. Pseudocode above describes algorithms procedure.
 
