@@ -56,6 +56,37 @@ def kernel_builder(size, b2d=False, normalize=False, vertical_edges=False, unit=
         kernel = kernel/kernel.max()
 
     return kernel
+
+
+
+def normalise(img, minmax_val=(0,1), astyp=np.float32):
+        '''
+        Normalise image between [0, 1]
+        
+        INPUTS:
+        ----------------
+            img (2darray) : Image
+            
+            minmax_val (2-tuple) : Tuple storing minimum and maximum values
+            
+            astyp (object) : What data type to store normalised image
+        '''
+        # Extract minimum and maximum values
+        min_val, max_val = minmax_val
+        
+        # Convert to float type
+        img = img.astype(np.float32)
+        
+        # Normalise
+        img -= img.min()
+        img /= img.max()
+        
+        # Rescale to max_val
+        img *= (max_val - min_val)
+        img += min_val
+        
+        return img.astype(astyp)
+
     
     
 def comp_grad_img(img, kernel):

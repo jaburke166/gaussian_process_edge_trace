@@ -194,7 +194,17 @@ class GP_Edge_Tracing(object):
         else:
             alpha_init = 0.5*np.ones((self.init.shape[0]))
         alpha_obs = np.ones((obs.shape[0]))
-        alpha = np.concatenate([alpha_init, alpha_obs], axis=0)
+
+        # Construct inputs and outputs, depending on if endpoitns are fixed and if we've converged
+        obs = obs.reshape(-1,2)
+        if converged and not self.fix_endpoints:
+            alpha = alpha_obs
+            new_obs = obs
+        else:
+            alpha = np.concatenate([alpha_init, alpha_obs], axis=0)
+            new_obs = np.concatenate([self.init, obs], axis=0)
+        X = new_obs[:,0][:, np.newaxis]
+        y = new_obs[:,1]
         
         # Set up constant kernel and weighted white noise kernel 
         white_kernel = WeightedWhiteKernel(edge_length=self.x_grid.shape[0], noise_weight=alpha, 
@@ -211,12 +221,6 @@ class GP_Edge_Tracing(object):
         # Construct Gaussian process regressor
         gp_params['kernel'] = kernel
         gp = GPR(**gp_params)
-        
-        # Construct inputs and outputs
-        obs = obs.reshape(-1,2)
-        new_obs = np.concatenate([self.init, obs], axis=0)
-        X = new_obs[:,0][:, np.newaxis]
-        y = new_obs[:,1]
     
         # Fit data to the GP to update mean and covariance matrix
         gp.fit(X, y)
@@ -238,9 +242,15 @@ class GP_Edge_Tracing(object):
                                        alpha=0.2, color='k', zorder=1, label='95% Credible Region')
             plt_samples = ax.plot(self.x_grid, y_plt_samples, lw=1, zorder=2)
 
-            # Overlay initial endpoints and observations
-            plt_init = ax.scatter(self.init[:, 0], self.init[:,1], c='m', s=5*fontsize, zorder=4,
+            # Overlay initial endpoints, depending on if fixing initial endpoints or not.
+            if converged and not self.fix_endpoints:
+                plt_init = ax.scatter(obs[[0,-1], 0], obs[[0,-1], 1], c='m', s=5*fontsize, zorder=5,
                                         edgecolors=(0, 0, 0), label='Edge Endpoints')
+            else:
+                plt_init = ax.scatter(self.init[:, 0], self.init[:,1], c='m', s=5*fontsize, zorder=5,
+                                        edgecolors=(0, 0, 0), label='Edge Endpoints')
+
+            # Overlay observations
             if obs.size > 0:
                 post_obs = ax.scatter(obs[:,0], obs[:,1], c='r', s=3*fontsize, 
                                        zorder=4, edgecolors=(0, 0, 0), label='Observations')
@@ -567,7 +577,11 @@ class GP_Edge_Tracing(object):
         # Also remove first and last columns since all egdes are pinned down to these points and will always have highest 
         # score.
         pixel_idx = np.argwhere(kde_arr > 1e-4)
-        pixel_idx = pixel_idx[(pixel_idx[:,1] > self.x_st) & (pixel_idx[:,1] < self.x_en)]
+
+        # If fixing endpoints, then assume endpoints are true estimates of the edge and don't accept
+        # any new pixels for these columns.
+        if self.fix_endpoints:
+            pixel_idx = pixel_idx[(pixel_idx[:,1] > self.x_st) & (pixel_idx[:,1] < self.x_en)]
 
         # Compute pixel score and threshold pixels using score_thresh
         best_pts_scores = self.comp_pixel_score(pixel_idx, kde_arr)
@@ -690,9 +704,9 @@ class GP_Edge_Tracing(object):
         # Plot random samples drawn from Gaussian process with chosen kernel and ask to continue with algorithm.   
         if show_init_post:
             _ = self.fit_predict_GP(self.obs, plt_post=True, N_plt_samples=20, converged=False)
-            print('Are you happy with your choice of kernel? Answer with "Yes" or "No"')
+            print('Are you happy with your choice of kernel? y/n')
             cont = input()
-            if cont.lower() != 'yes':
+            if cont.lower() != 'y':
                 return
 
         # Measure time elapsed
