@@ -70,13 +70,13 @@ class GP_Edge_Tracing(object):
         '''
         
         # Set global internal parameters
-        self.init = init
+        self.init = init.astype(np.uint8)
         self.x_st, self.x_en = int(init[0,0]), int(init[-1,0])
         self.grad_img = grad_img
         self.noise_y = 100 * noise_y
         self.kernel_options = kernel_options
         self.N_samples = N_samples
-        self.obs = obs
+        self.obs = obs.astype(np.uint8)
         self.seed = seed
         self.bandwidth = bandwidth
         self.keep_ratio = keep_ratio
