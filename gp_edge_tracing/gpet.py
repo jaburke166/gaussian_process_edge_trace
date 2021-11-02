@@ -9,8 +9,6 @@ This module traces an edge in an image using Gaussian process regression.
 
 """
 import numpy as np
-import os
-import numpy.matlib as npml
 import time as t
 import sklearn.gaussian_process as skgp
 import matplotlib.pyplot as plt
@@ -391,14 +389,16 @@ class GP_Edge_Tracing(object):
             y_samples (array) : N_samples posterior curves sampled from the gaussian process posterior of the current iteration.
         '''
         # Stack the samples and their input locations to be fetched for computing their cost.
-        X = npml.repmat(self.x_grid, self.N_samples, 1).T
+        #X = npml.repmat(self.x_grid, self.N_samples, 1).T # DEPRECATED import numpy.matlib as npml
+        X = np.repeat(self.x_grid, (self.N_samples,1)).T
         curves = np.stack((X, y_samples), axis=2)
 
         # Initialise list costs of these best curves and compute costs of each best curve
         costs = []
-        for i in range(self.N_samples):
-            costs.append(self.cost_funct(curves[:,i,:]))
-        costs = np.asarray(costs)
+        costs = np.apply_along_axis(self.cost_funct, 1, curves) # Quicker using than loop
+        # for i in range(self.N_samples):
+        #     costs.append(self.cost_funct(curves[:,i,:]))
+        # costs = np.asarray(costs)
 
         # Select N_keep curves as the best curves and their costs
         best_idxs = np.argsort(costs)[: self.N_keep]
