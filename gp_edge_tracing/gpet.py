@@ -1,13 +1,14 @@
-# -*- coding: utf-8 -*-
 """
 Created on Wed 19 May 15:06:44 2021
 
 @author: Jamie Burke
-@email: s1522100@ed.ac.uk
+@email: Jamie.Burke@ed.ac.uk
 
-This module traces an edge in an image using Gaussian process regression.
+The module provides a framework to trace individual edges in an image using Gaussian process regression.
 
 """
+
+# Import relevant packages
 import numpy as np
 import time as t
 import sklearn.gaussian_process as skgp
@@ -15,6 +16,7 @@ import matplotlib.pyplot as plt
 
 from .sklearn_gpr import GaussianProcessRegressor as GPR
 from .sklearn_gpr import WeightedWhiteKernel
+from .gpet_utils import normalise
 from scipy.interpolate import LinearNDInterpolator
 from scipy.integrate import simps
 from KDEpy import FFTKDE
@@ -24,61 +26,68 @@ class GP_Edge_Tracing(object):
     This module traces an individual edge in an image using Gaussian process regression.
     '''
     
-    def __init__(self, init, grad_img, kernel_options=(1,3,3), noise_y=1, obs=np.array([]), N_samples=1000,
-                score_thresh=0.5, delta_x=10, keep_ratio=0.1, seed=1, bandwidth=1, return_std=False, fix_endpoints=False):
+    def __init__(self, init, grad_img, kernel_options=(1,3,3), noise_y=1, obs=np.array([]),
+                N_samples=1000, score_thresh=1, delta_x=5, keep_ratio=0.1, seed=1,
+                return_std=False, fix_endpoints=False):
         '''
         Internal parameters of the edge tracing algorithm.
         
         INPUTS:
         -----------
-            init (2D-array) : Array of start and end indexes of edge, i.e. init= np.array([[st_x, st_y],[en_x, en_y]]).
-            Must be inputted by user.
+            init (2darray, compulsory input) : Pixel coordinates of the edge of interest. This is 
+            inputted in $xy$-space, i.e. init=np.array([[st_x, st_y],[en_x, en_y]]).
 
-            grad_img (array) : Gradient of image. Must be inputted by user. Assumed to be normalised between [0, 1].
+            grad_img (2darray, compulsory input) : Estimated edge map, or image gradient. This is 
+            normalised to $[0,1]$. 
 
-            kernel_options (tuple or dict) : For ease in automation, this provides the user with the option of which kernel to 
-            go for. Will be a tuple of integers with 2 options for kernel type (RBF or Matern), 5 options for the function variance 
-            and 5 options for the lengthscale which are scaled according to the image height and length of edge.
+            kernel_options (dict or 3-tuple, compulsory input) : Kernel type and hyperparameters. Only
+            the square exponential and Matern class are implemented. Format of dict is, for example,
+            {'kernel_type':'RBF', 'sigma_f':50, 'length_scale':100} for the square exponential kernel.
+            If inputting 3-tuple, format is (k, s, l) where k=0,1 (RBF, Matern), s,l=0,...5, define
+            scales of function variance and lengthscale, chosen according to the image height and edge 
+            of interest length, respectively.
             
-            noise_y (float) : Amount of noise to perturb the samples drawn from Gaussian process from the non-endpoint observations.
-            Default value: 1.
+            noise_y (float, default 1) : Amount of noise to perturb the posterior samples drawn from 
+            Gaussian process from the observation set.
 
-            obs (2d-array) : Observations to fit to the model. Usually used when propagating points from a different edge to 
-            improve convergence of the current edge of interest. Default value: np.array([]) (empty array).
+            obs (2darray, default np.array([])) : xy-space observations to fit to the Gaussian 
+            process. User-specified at initialisation when propagating edge pixels from a different edge 
+            to improve accuracy and quicken convergence of the current edge of interest (see section 4.4 
+            of paper)). Otherwise, this parameter is used in the recursive Bayesian scheme to converge 
+            posterior predictive distribution to edge of interest.
 
-            N_samples (int) : Number of samples to draw from Gaussian process. Default value: 1000.
+            N_sample (int, default 1000) : Number of posterior curves to sample from the Gaussian 
+            process in each iteration. 
 
-            score_thresh (float) : Initial pixel score to determine which observations to accept and fit to the Gaussian process in
-            each iteration. Default value: 0.5.
+            score_thresh (float, default 1) : Initial pixel score to determine which observations to 
+            accept and fit to the Gaussian process in each iteration.
 
-            delta_x  (int) : Length of sub-intervals to split x-axis into. Default value: 10. Number of subintervals=N//delta_x 
-            where N is the width of the image.
+            delta_x (int, default 5) : Length of sub-intervals to split horizontal, $x$-axis during 
+            search for edge pixels. Number of subintervals=N//delta_x, where $N$ is the width of the 
+            image. Algorithm terminates after N//delta_x are located and fitted to Gaussian process.
 
-            keep_ratio (float) : Proportion of best curves to use to score and choose observations. Default value: 0.1.
+            keep_ratio (float, default 0.1) : Proportion of posterior curves, coined as optimal, to use to score pixels and select new observations for next iteration. Value must be in (0, 1].
 
-            seed (int) : Seed to fix random sampling of Gaussian Process. Default value: 1522100.     
+            seed (int, default 1) : Integer to fix random sampling of posterior curves from Gaussian Process in each iteration.   
             
-            bandwidth (float) : Bandwith defining the radius of the Gaussian kernel when computing weighted density function
-            of the optimal posterior curves.
+            return_std (bool, default False) : If flagged, return 95% credible interval as well as edge 
+            trace.
             
-            return_std (bool) : If flagged, return 95% credible interval as well as edge trace.
-            
-            fix_endpoints (bool) : If flagged, user-inputted edge endpoints are fixed (negligible observation noise is chosen for
-            these pixels).
+            fix_endpoints (bool, default False) : If flagged, user-inputted edge endpoints init are fixed 
+            (negligible observation noise is chosen for these pixels).
         '''
         
         # Set global internal parameters
-        self.init = init.astype(np.uint8)
+        self.init = init.astype(int)
         self.x_st, self.x_en = int(init[0,0]), int(init[-1,0])
-        self.grad_img = grad_img
+        self.grad_img = normalise(grad_img, minmax_val=(0,1), astyp=np.float32)
         self.noise_y = 100 * noise_y
         self.kernel_options = kernel_options
-        self.N_samples = N_samples
-        self.obs = obs.astype(np.uint8)
+        self.N_samples = int(N_samples) if N_samples > 1 else 1000
+        self.obs = obs.astype(int)
         self.seed = seed
-        self.bandwidth = bandwidth
-        self.keep_ratio = keep_ratio
-        self.score_thresh = score_thresh
+        self.keep_ratio = float(keep_ratio) if 0 < keep_ratio <= 1 else 0.1
+        self.score_thresh = float(score_thresh) if 0 < score_thresh <= 1 else 1
         self.delta_x = int(delta_x) if delta_x > 3 else 2
         self.return_std = return_std
         self.fix_endpoints = fix_endpoints
@@ -87,11 +96,12 @@ class GP_Edge_Tracing(object):
         self.size = grad_img.shape
         self.M, self.N = self.size
         self.x_grid = self.x_st + np.arange(self.x_en - self.x_st + 1).astype(int)
+        self.X =  np.repeat(self.x_grid.reshape(-1,1), self.N_samples, axis=-1)
         self.edge_length = self.x_grid.shape[0]
         self.N_subints = int(self.edge_length // self.delta_x)
         self.N_keep = int(keep_ratio*N_samples)
         
-        # Compute interpolated gradient surface and compute KDE of image gradient
+        # Compute interpolated gradient surface and KDE of image gradient
         self.grad_kde = self.kernel_density_estimate(grad_img=True)
         self.grad_interp = self.grad_interpolation(grad_img)
         
@@ -190,7 +200,7 @@ class GP_Edge_Tracing(object):
         if self.fix_endpoints:
             alpha_init = 1e-7*np.ones((self.init.shape[0]))
         else:
-            alpha_init = 0.5*np.ones((self.init.shape[0]))
+            alpha_init = np.ones((self.init.shape[0]))
         alpha_obs = np.ones((obs.shape[0]))
 
         # Construct inputs and outputs, depending on if endpoitns are fixed and if we've converged
@@ -389,16 +399,13 @@ class GP_Edge_Tracing(object):
             y_samples (array) : N_samples posterior curves sampled from the gaussian process posterior of the current iteration.
         '''
         # Stack the samples and their input locations to be fetched for computing their cost.
-        #X = npml.repmat(self.x_grid, self.N_samples, 1).T # DEPRECATED import numpy.matlib as npml
-        X = np.repeat(self.x_grid, (self.N_samples,1)).T
-        curves = np.stack((X, y_samples), axis=2)
+        curves = np.stack((self.X, y_samples), axis=-1)
 
         # Initialise list costs of these best curves and compute costs of each best curve
         costs = []
-        costs = np.apply_along_axis(self.cost_funct, 1, curves) # Quicker using than loop
-        # for i in range(self.N_samples):
-        #     costs.append(self.cost_funct(curves[:,i,:]))
-        # costs = np.asarray(costs)
+        for i in range(self.N_samples):
+            costs.append(self.cost_funct(curves[:,i,:]))
+        costs = np.asarray(costs)
 
         # Select N_keep curves as the best curves and their costs
         best_idxs = np.argsort(costs)[: self.N_keep]
@@ -414,7 +421,7 @@ class GP_Edge_Tracing(object):
         
      
         
-    def kernel_density_estimate(self, best_curves=None, costs=None, normalise=True, grad_img=False):
+    def kernel_density_estimate(self, best_curves=None, costs=None, normalise=True, bw=1, grad_img=False):
         '''
         This function estimates the kernel density function of the Gaussian process' posterior distributions belief in where
         the edge of interest lies, through using the finite sample distribution of the most optimal posterior curves. This also
@@ -430,7 +437,7 @@ class GP_Edge_Tracing(object):
             normalise (bool) : Whether to normalise PDF between 0 and 1 rather than leave it as a well-defined PDF (where integrating 
             across the domain equals 1).
 
-            bw (float) : Bandwidth of Gaussian kernel. Taken out on 09/09/2021 to allow user-inputted parameter self.bandwidth
+            bw (float) : Bandwidth of Gaussian kernel.
 
             grad_img (bool) : Boolean value of whether to compute kernel density estimate of image gradient or not.
         '''
@@ -452,18 +459,12 @@ class GP_Edge_Tracing(object):
             out_of_domain_pts = np.argwhere((sample_pts[:,1] < 0) | (sample_pts[:,1] > self.M-1))
             sample_pts = np.delete(sample_pts, out_of_domain_pts, axis=0)
             weights_arr = np.delete(weights_arr, out_of_domain_pts, axis=0)
-            
-            # Define bandwidth
-            bw = self.bandwidth
         else:
             # Extract non-zero gradient intensity pixel coordinates. Weight each coordinate according
             # to their gradient intensity
             sample_pts = np.argwhere(self.grad_img > 1e-4)
             weights_arr = self.grad_img[sample_pts[:,0], sample_pts[:,1]].reshape(-1)
             sample_pts = sample_pts[:, [1,0]].reshape(-1,2)
-            
-            # Define bandwidth
-            bw = 1
 
         # Estimate kernel density function using a Gaussian kernel with bandwidth matrix [[1, 0], [0, 1]], i.e. 2x2 Identity matrix. 
         # This is equivalent to centering a Gaussian kernel on each sample point with a circle of radius 1 so there is 
@@ -692,21 +693,20 @@ class GP_Edge_Tracing(object):
 
         INPUTS:
         -----------
-            show_init_post (bool) : Flag to show the initial posterior predictive distribution and ask user to continue or not.
+            print_final_diagnostics (bool, default False) : If flaged, print diagnostics at the end; plot of edge prediction with/without 95% credible interval on inputted image gradient and plot of iteration vs. cost.
+
+            show_init_post (bool default False) : If flagged, show initial posterior predictive distribution (after fitting init (and obs) and ask use to continue or not.
             
-            show_post_iter (bool) : Flag to show posterior predictive distribution during the fitting procedure.
+            show_post_iter (bool default False) : If flagged, show the posterior predictive distribution during each iteration of the fitting procedure.
 
-            print_final_diagnostics (bool) : Flag to plot the optimal curves and their costs on the gradient image once algorithm
-            converges. Default value: False.
-
-            verbose (bool) : If flagged, output text updating user on fitting procedure.
+            verbose (bool default False) : If flagged, output text updating user on time/iter, number of observations/iter and any adaptive score threshold reduction.
         '''
         # Plot random samples drawn from Gaussian process with chosen kernel and ask to continue with algorithm.   
         if show_init_post:
             _ = self.fit_predict_GP(self.obs, plt_post=True, N_plt_samples=20, converged=False)
             print('Are you happy with your choice of kernel? y/n')
             cont = input()
-            if cont.lower() != 'y':
+            if cont.lower()[0] != 'y':
                 return
 
         # Measure time elapsed
@@ -777,7 +777,7 @@ class GP_Edge_Tracing(object):
         # Compute and print time elapsed
         alg_en = t.time()
         if verbose:
-            print(f'Time elapsed before algorithm converged: {round(alg_en-alg_st, 3)}') # Commented out verbosity of algorithm
+            print(f'Time elapsed before algorithm converged: {round(alg_en-alg_st, 3)}') 
 
         if self.return_std:
             return edge_trace, cred_interval
