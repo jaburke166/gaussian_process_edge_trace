@@ -20,7 +20,7 @@ For open access to this paper for information on the algorithm, pseudocode, appl
 
 ## Getting started
 
-### Package requirements
+### Required packages
 
 * `numpy`
 * `matplotlib`
@@ -32,7 +32,7 @@ For open access to this paper for information on the algorithm, pseudocode, appl
 
 ### Code demonstration
 
-After cloning this repository, import the [python module](gp_edge_tracing/), the provided [utilities](gp_edge_tracing/gpet_utils.py) script:
+After cloning this repository, import the [python module](gp_edge_tracing/) and the provided [utilities](gp_edge_tracing/gpet_utils.py) script:
 
 ```
 # Import relevant python packages
