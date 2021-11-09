@@ -25,7 +25,7 @@ For open access to this paper for information on the algorithm, pseudocode, appl
 * `numpy`
 * `matplotlib`
 * `scikit-learn`
-* `scitkit-image`
+* `scikit-image`
 * `KDEpy`
 * `scipy`
 * `time`
