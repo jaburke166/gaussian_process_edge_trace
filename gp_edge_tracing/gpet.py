@@ -35,10 +35,10 @@ class GP_Edge_Tracing(object):
         INPUTS:
         -----------
             init (2darray, compulsory input) : Pixel coordinates of the edge of interest. This is 
-            inputted in $xy$-space, i.e. init=np.array([[st_x, st_y],[en_x, en_y]]).
+            inputted in xy-space, i.e. init=np.array([[st_x, st_y],[en_x, en_y]]).
 
             grad_img (2darray, compulsory input) : Estimated edge map, or image gradient. This is 
-            normalised to $[0,1]$. 
+            normalised to [0,1]. 
 
             kernel_options (dict or 3-tuple, compulsory input) : Kernel type and hyperparameters. Only
             the square exponential and Matern class are implemented. Format of dict is, for example,
