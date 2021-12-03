@@ -11,7 +11,7 @@ We introduce a novel edge tracing algorithm using Gaussian process regression. O
 
 ### More information
 
-Paper which describes this methodology has been accepted to be published in IEEE Transactions on Image Processing in December 2021 or January 2022 (TBC).
+Paper which describes this methodology has been [published](https://ieeexplore.ieee.org/document/9623378) in the journal IEEE Transactions on Image Processing. 
 
 For open access to this paper for information on the algorithm, pseudocode, applications and discussion, see [here](https://arxiv.org/abs/2111.03605)
 
@@ -93,7 +93,21 @@ We can then superimpose the edge prediction and 95% credible interval onto the t
 please refer to this [notebook](gpet_demo.ipynb) for the code to reproduce this result, as well as where to find more information on the compulsory, tuning and verbosity parameters.
 
 ---
-## Contributors
+## Contributors and Citing
 
 * Jamie Burke (Jamie.Burke@ed.ac.uk)
+
+If you wish to use or cite this methodology please use the following BibText
+
+```
+@ARTICLE{9623378,
+  author={Burke, Jamie and King, Stuart},
+  journal={IEEE Transactions on Image Processing}, 
+  title={Edge Tracing Using Gaussian Process Regression}, 
+  year={2022},
+  volume={31},
+  number={},
+  pages={138-148},
+  doi={10.1109/TIP.2021.3128329}}
+  ```
 
