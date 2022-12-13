@@ -24,7 +24,7 @@ class GP_Edge_Tracing(object):
                  grad_img, 
                  kernel_options=(1,3,3), 
                  noise_y=1, 
-                 obs=np.array([]),
+                 obs=np.array([], dtype=np.int8),
                  N_samples=500, 
                  score_thresh=1, 
                  delta_x=10, 
@@ -88,9 +88,9 @@ class GP_Edge_Tracing(object):
         # Set global internal parameters
         self.init = init.astype(int)
         self.x_st, self.x_en = int(init[0,0]), int(init[-1,0])
-        self.grad_img = normalise(grad_img, minmax_val=(0,1), astyp=np.float32)
+        self.grad_img = gpet_utils.normalise(grad_img, minmax_val=(0,1), astyp=np.float64)
         self.noise_y = 100 * noise_y
-        self.N_samples = int(N_samples) if N_samples > 1 else 1000
+        self.N_samples = int(N_samples) if N_samples > 100 else 1000
         self.obs = obs.reshape(-1,2).astype(np.int8)
         self.seed = seed
         self.keep_ratio = float(keep_ratio) if 0 < keep_ratio <= 1 else 0.1
@@ -163,7 +163,7 @@ class GP_Edge_Tracing(object):
                                                 length_scale=self.sigma_l, 
                                                 length_scale_bounds="fixed")
         else:
-            self.default_kernel = skgp.kernels.RBF(length_scale=self.sigma_l, 
+            self.gp_kernel = skgp.kernels.RBF(length_scale=self.sigma_l, 
                                                    length_scale_bounds="fixed")
             
         # Define default kernel during fitting procedure (before convergence=True)
@@ -571,21 +571,21 @@ class GP_Edge_Tracing(object):
         new_int_vals = kde_arr[pixel_idx[:,0], pixel_idx[:,1]]
 
         # Compute new scores for previous observations
-        #old_int_vals = kde_arr[pre_fobs[:,0], pre_fobs[:,1]]
+        old_int_vals = kde_arr[pre_fobs[:,0], pre_fobs[:,1]]
                                     
         # Remove those which have no intersections with best curves of new iteration
-        #old_int_idx = old_int_vals > self.kde_thresh
-        #old_fobs = pre_fobs[old_int_idx]
-        #old_int_vals = old_int_vals[old_int_idx]
-        #old_grad_vals = self.grad_kde[old_fobs[:,0], old_fobs[:,1]] 
+        old_int_idx = old_int_vals > self.kde_thresh
+        old_fobs = pre_fobs[old_int_idx]
+        old_int_vals = old_int_vals[old_int_idx]
+        old_grad_vals = self.grad_kde[old_fobs[:,0], old_fobs[:,1]] 
                                     
         # Concatenate old and new int and grad vals
-        #pixel_candidates = np.concatenate([old_fobs, pixel_idx], axis=0)
-        #intersection_vals = np.concatenate([old_int_vals, new_int_vals], axis=0)   
-        #grad_vals = np.concatenate([old_grad_vals, new_grad_vals], axis=0)    
-        pixel_candidates = pixel_idx
-        intersection_vals = new_int_vals
-        grad_vals = new_grad_vals
+        pixel_candidates = np.concatenate([old_fobs, pixel_idx], axis=0)
+        intersection_vals = np.concatenate([old_int_vals, new_int_vals], axis=0)   
+        grad_vals = np.concatenate([old_grad_vals, new_grad_vals], axis=0)    
+        #pixel_candidates = pixel_idx
+        #intersection_vals = new_int_vals
+        #grad_vals = new_grad_vals
         
         # Compute score for each pixel based on KDE's of image gradient and posterior curves. 
         pixel_scores = 1/3 * (intersection_vals * grad_vals + intersection_vals + grad_vals)
