@@ -340,8 +340,8 @@ class GaussianProcessRegressor(MultiOutputMixin,
                 # numerical issues. If yes: set the variance to 0.
                 y_var_negative = y_var < 0
                 if np.any(y_var_negative):
-                    warnings.warn("Predicted variances smaller than 0. "
-                                  "Setting those variances to 0.")
+                    #warnings.warn("Predicted variances smaller than 0. "
+                    #              "Setting those variances to 0.")
                     y_var[y_var_negative] = 0.0
 
                 # undo normalisation
