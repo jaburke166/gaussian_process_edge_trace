@@ -497,9 +497,9 @@ class GP_Edge_Tracing(object):
         disc_kde = gpet_utils.normalise(disc_kde, (0,1), np.float64)
 
         return disc_kde   
-        
-        
-        
+    
+    
+    
     def bin_pts(self, 
                 best_pts_scores):
         '''
@@ -510,7 +510,7 @@ class GP_Edge_Tracing(object):
         INPUTS:
         -------------------
             best_pts_scores (np.array) : Array of pixel coordinates whose score surpasses the score threshold.
-                First and second axes represents x- and y-coordinates of points and third axis represents the
+                First and second axes represents x- and y-coordinates of points and third column represents the
                 corresponding score.
                 
         RETURNS:
@@ -518,18 +518,15 @@ class GP_Edge_Tracing(object):
             fobs (np.array) : Highest scoring pixels, one pixel per sub-interval.
         '''
         # Bin thresholded pixel coordinates into sub-intervals of length delta_x
-        x_visited = (self.N_subints+1)*[[]]
-        bin_idx = np.floor((best_pts_scores[:,0]-self.x_st)/self.delta_x).astype(int)
+        shift_best_x = (best_pts_scores[:,0]-self.x_st).astype(int)
+        bin_idx = shift_best_x//self.delta_x
+        unique_bins = np.unique(bin_idx)
         
         # choose highest scoring pixel coordinate per sub-interval
-        fobs_scores = []
-        for idx, i in enumerate(np.unique(bin_idx)):
-            x_visited[i] = best_pts_scores[np.argwhere(bin_idx == i)].reshape(-1,3)
-            fobs_scores.append(x_visited[i][np.argmax(x_visited[i][:,2])])
-
-        # Convert to array and return the pixel coordinates, not the scores as these are updated in each iteration.
-        fobs_scores = np.asarray(fobs_scores).reshape(-1,3)
-        fobs = fobs_scores[:,:2].astype(int)
+        fobs = np.zeros((unique_bins.shape[0], 2), dtype=np.int64)
+        for idx, binn in enumerate(unique_bins):
+            binned_pixels = best_pts_scores[np.argwhere(bin_idx == binn)].reshape(-1,3)
+            fobs[idx] = binned_pixels[np.argmax(binned_pixels[:,-1]), :2]
 
         return fobs
         
