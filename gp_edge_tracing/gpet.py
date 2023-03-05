@@ -213,8 +213,8 @@ class GP_Edge_Tracing(object):
         else:
             self.gp_params['optimizer'] = 'fmin_l_bfgs_b'
             self.gp_params['n_restarts_optimizer'] = 5
-            self.gp_kernel.length_scale_bounds = (1e-3*self.sigma_l, 1e3*self.sigma_l)
-            self.constant_kernel.constant_value_bounds = (1e-3*self.sigma_f, 1e3*self.sigma_f)
+            self.gp_kernel.length_scale_bounds = (1e-2*self.sigma_l, 1e2*self.sigma_l)
+            self.constant_kernel.constant_value_bounds = (1e-2*self.sigma_f, 1e2*self.sigma_f)
             noise_kernel.noise_level_bounds = (1e-7, self.noise_y)
             iter_kernel = self.constant_kernel * self.gp_kernel + noise_kernel
 
@@ -833,11 +833,14 @@ class GP_Edge_Tracing(object):
             best_curves, best_costs, (optimal_curve, optimal_cost) = self.get_best_curves(y_samples)
             iter_optimal_curves.append(optimal_curve)
             iter_optimal_costs.append(optimal_cost)
+            
+            # TESTING
+            print(pre_fobs)
                                     
             # Determine the set of pixel coordinates which exceed the score threshold for the current iteration. 
             # Scores are computed using the image gradient and optimal posterior curves. We make sure to have
             # at least 1 *more* pixel fitted in consecutive iterations by reducing score threshold by 5% if necessary
-            pre_fobs = self.get_best_pixels(best_curves, best_costs, pre_fobs)
+            pre_fobs = self.get_best_pixels(best_curves, best_costs, pre_fobs[:,[1,0]])
             
             # Recompute number of observations
             n_fobs = pre_fobs.shape[0]
