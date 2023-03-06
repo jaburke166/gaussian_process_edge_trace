@@ -218,13 +218,20 @@ class GP_Edge_Tracing(object):
         else:
             self.gp_params['optimizer'] = 'fmin_l_bfgs_b'
             self.gp_params['n_restarts_optimizer'] = 5
-            self.gp_kernel.length_scale_bounds = (1e-2*self.sigma_l, 1e2*self.sigma_l)
-            self.constant_kernel.constant_value_bounds = (1e-2*self.sigma_f, 1e2*self.sigma_f)
+            self.gp_kernel.length_scale_bounds = (1e-3*self.sigma_l, 1e3*self.sigma_l)
+            self.constant_kernel.constant_value_bounds = (1e-3*self.sigma_f, 1e3*self.sigma_f)
             noise_kernel.noise_level_bounds = (1e-7, self.noise_y)
             iter_kernel = self.constant_kernel * self.gp_kernel + noise_kernel
+            
+            # Standardise y to improve conditioning for optimiser
             self.y_mean = np.mean(y)
             self.std_y_ = np.std(y)
             y  = (y - self.y_mean) / self.std_y_
+            
+            # Standardise X to improve conditioning for optimiser
+            self.X_mean = np.mean(X)
+            self.std_X_ = np.std(X)
+            X = (X - self.X_mean) / self.std_X_
 
         # Construct Gaussian process regressor and fit data to the GP to update mean and covar matrix
         self.gp_params['kernel'] = iter_kernel
@@ -236,7 +243,10 @@ class GP_Edge_Tracing(object):
             y_samples = gp.sample_y(self.x_grid[:, np.newaxis], self.N_samples, random_state=seed)
             outputs = y_samples
         else:
-            y_mean, y_std = gp.predict(self.x_grid[:, np.newaxis], return_std=True)
+            # Predict using standardised inputs
+            x_m, x_s = np.mean(self.x_grid), np.std(self.x_grid)
+            x_grid_std = (self.x_grid - x_m) / x_s
+            y_mean, y_std = gp.predict(x_grid_std[:, np.newaxis], return_std=True)
             outputs = (y_mean, y_std)
 
         return outputs
@@ -861,12 +871,13 @@ class GP_Edge_Tracing(object):
         # Once condition above is met, we optimise the observation noise and kernel hyperparameters by maximising 
         # the marginal likelihood of the training set of pixel coordinates. 
         output = self.fit_predict_GP(pre_fobs, converged=True, seed=self.seed+N_iter)
-        y_mean_optim, y_std = output
-        y_mean_optim *= self.std_y_
-        y_mean_optim += self.y_mean
+        y_mean_optim_std, y_std = output
+        
+        # Need to transform targets back to original range and dispersion across image
+        y_mean_optim = y_mean_optim_std * self.std_y_ + self.y_mean
         cred_interval = (y_mean_optim - 1.96*y_std, y_mean_optim + 1.96*y_std)
-        # Note, this doesn't take into account the optimisation of these pixel coordinates being edge coordinates 
-        # of the edge of interest however. Future work would include this. 
+        # Note, this optimisation doesn't take into account the optimisation of these pixel coordinates being edge coordinates 
+        # of the edge of interest however. Future improvements should include this. 
             
         # Compute predicted edge by converting mean function to pixel coordinates
         optim_mean_curve = np.concatenate([self.x_grid[:,np.newaxis], y_mean_optim[:, np.newaxis]], axis=1)
