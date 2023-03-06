@@ -208,6 +208,11 @@ class GP_Edge_Tracing(object):
                                                        noise_weight = alpha, 
                                                        noise_level = self.noise_y, 
                                                        noise_level_bounds = "fixed")
+        # Extract training inputs and outputs
+        X = new_obs[:,0][:, np.newaxis].astype(np.float64)
+        y = new_obs[:,1].astype(np.float64)
+        
+        # Depending on whether edge tracer has converged, setup fitting scheme for kernel parameters
         if not converged:
             iter_kernel = self.default_kernel + noise_kernel
         else:
@@ -217,14 +222,13 @@ class GP_Edge_Tracing(object):
             self.constant_kernel.constant_value_bounds = (1e-2*self.sigma_f, 1e2*self.sigma_f)
             noise_kernel.noise_level_bounds = (1e-7, self.noise_y)
             iter_kernel = self.constant_kernel * self.gp_kernel + noise_kernel
+            self.y_mean = np.mean(y)
+            self.std_y_ = np.std(y)
+            y  = (y - self.y_mean) / self.std_y_
 
-        # Construct Gaussian process regressor
+        # Construct Gaussian process regressor and fit data to the GP to update mean and covar matrix
         self.gp_params['kernel'] = iter_kernel
         gp = sklearn_gpr.GaussianProcessRegressor(**self.gp_params)
-    
-        # Fit data to the GP to update mean and covariance matrix
-        X = new_obs[:,0][:, np.newaxis]
-        y = new_obs[:,1]
         gp.fit(X, y)
         
         # Sample posterior curves
@@ -835,7 +839,7 @@ class GP_Edge_Tracing(object):
             iter_optimal_costs.append(optimal_cost)
             
             # TESTING
-            print(pre_fobs)
+            # print(pre_fobs)
                                     
             # Determine the set of pixel coordinates which exceed the score threshold for the current iteration. 
             # Scores are computed using the image gradient and optimal posterior curves. We make sure to have
@@ -858,6 +862,8 @@ class GP_Edge_Tracing(object):
         # the marginal likelihood of the training set of pixel coordinates. 
         output = self.fit_predict_GP(pre_fobs, converged=True, seed=self.seed+N_iter)
         y_mean_optim, y_std = output
+        y_mean_optim *= self.std_y_
+        y_mean_optim += self.y_mean
         cred_interval = (y_mean_optim - 1.96*y_std, y_mean_optim + 1.96*y_std)
         # Note, this doesn't take into account the optimisation of these pixel coordinates being edge coordinates 
         # of the edge of interest however. Future work would include this. 
