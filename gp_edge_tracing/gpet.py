@@ -91,12 +91,13 @@ class GP_Edge_Tracing(object):
         self.grad_img = gpet_utils.normalise(grad_img, minmax_val=(0,1), astyp=np.float64)
         self.noise_y = 100 * noise_y
         self.N_samples = int(N_samples) if N_samples > 100 else 1000
-        self.obs = obs.reshape(-1,2).astype(np.int8)
+        self.obs = obs.reshape(-1,2).astype(np.int64)
         self.seed = seed
         self.keep_ratio = float(keep_ratio) if 0 < keep_ratio <= 1 else 0.1
         self.pixel_thresh = int(pixel_thresh) if pixel_thresh >= 2 else 2
         self.score_thresh = float(score_thresh) if 0 < score_thresh <= 1 else 1
         self.delta_x = int(delta_x) if delta_x > 3 else 2
+        self.half_delta = self.delta_x // 2
         self.return_std = return_std
         self.fix_endpoints = fix_endpoints
         self.kde_thresh = 1e-3
@@ -109,6 +110,7 @@ class GP_Edge_Tracing(object):
         self.edge_length = self.x_grid.shape[0]
         self.N_subints = int(self.edge_length // self.delta_x)
         self.N_keep = int(keep_ratio*N_samples)
+        self.algo_thresh = self.N_subints-(self.pixel_thresh-1)
         
         # Compute interpolated gradient surface and KDE of image gradient
         self.grad_interp = scipy.interpolate.RectBivariateSpline(np.arange(self.M), 
@@ -198,9 +200,9 @@ class GP_Edge_Tracing(object):
                 the posterior distribution of the Gaussian process.
         '''
         # Construct inputs and outputs, depending on if endpoints are fixed and if we've converged
-        alpha_obs = np.ones((obs.shape[0]))
+        alpha_obs = np.ones((obs.shape[0])) 
         alpha = np.concatenate([self.alpha_init, alpha_obs], axis=0)
-        new_obs = np.concatenate([self.init, obs], axis=0)                     
+        new_obs = np.concatenate([self.init, obs], axis=0)   
         
         # Set up elements of kernel and optimisation parameters for GPR
         self.gp_params["random_state"] = seed
@@ -216,22 +218,20 @@ class GP_Edge_Tracing(object):
         if not converged:
             iter_kernel = self.default_kernel + noise_kernel
         else:
-            self.gp_params['optimizer'] = 'fmin_l_bfgs_b'
-            self.gp_params['n_restarts_optimizer'] = 5
-            self.gp_kernel.length_scale_bounds = (1e-3*self.sigma_l, 1e3*self.sigma_l)
-            self.constant_kernel.constant_value_bounds = (1e-3*self.sigma_f, 1e3*self.sigma_f)
-            noise_kernel.noise_level_bounds = (1e-7, self.noise_y)
+            #self.gp_params['optimizer'] = 'fmin_l_bfgs_b'
+            #self.gp_params['n_restarts_optimizer'] = 25
+            #self.gp_kernel.length_scale_bounds = (1e-3*self.sigma_l, 1e3*self.sigma_l)
+            #self.constant_kernel.constant_value_bounds = (1e-3*self.sigma_f, 1e3*self.sigma_f)
+            #noise_kernel.noise_level_bounds = (1e-12, self.noise_y)
             iter_kernel = self.constant_kernel * self.gp_kernel + noise_kernel
             
             # Standardise y to improve conditioning for optimiser
-            self.y_mean = np.mean(y)
-            self.std_y_ = np.std(y)
-            y  = (y - self.y_mean) / self.std_y_
+            #y_m, y_s = np.mean(y), np.std(y)
+            #y  = y / y_s
             
             # Standardise X to improve conditioning for optimiser
-            self.X_mean = np.mean(X)
-            self.std_X_ = np.std(X)
-            X = (X - self.X_mean) / self.std_X_
+            #X_m, X_s = np.mean(X), np.std(X)
+            #X = (X-X_m) / X_s
 
         # Construct Gaussian process regressor and fit data to the GP to update mean and covar matrix
         self.gp_params['kernel'] = iter_kernel
@@ -244,9 +244,9 @@ class GP_Edge_Tracing(object):
             outputs = y_samples
         else:
             # Predict using standardised inputs
-            x_m, x_s = np.mean(self.x_grid), np.std(self.x_grid)
-            x_grid_std = (self.x_grid - x_m) / x_s
-            y_mean, y_std = gp.predict(x_grid_std[:, np.newaxis], return_std=True)
+            #x_m, x_s = np.mean(self.x_grid), np.std(self.x_grid)
+            #x_grid_std = (self.x_grid - X_m) / x_s
+            y_mean, y_std = gp.predict(self.x_grid[:, np.newaxis], return_std=True)
             outputs = (y_mean, y_std)
 
         return outputs
@@ -512,44 +512,11 @@ class GP_Edge_Tracing(object):
 
         return disc_kde   
     
-    
-    
-    def bin_pts(self, 
-                best_pts_scores):
-        '''
-        This bins the best pixels into sub-intervals splitting, performing non-max suppression
-        to select the highest scoring pixel in each subinterval. These pixel coordinates
-        will be fitted to the Gaussian process in xy-space for the next iteraton.
 
-        INPUTS:
-        -------------------
-            best_pts_scores (np.array) : Array of pixel coordinates whose score surpasses the score threshold.
-                First and second axes represents x- and y-coordinates of points and third column represents the
-                corresponding score.
-                
-        RETURNS:
-        -------------------
-            fobs (np.array) : Highest scoring pixels, one pixel per sub-interval.
-        '''
-        # Bin thresholded pixel coordinates into sub-intervals of length delta_x
-        shift_best_x = (best_pts_scores[:,0]-self.x_st).astype(int)
-        bin_idx = shift_best_x//self.delta_x
-        unique_bins = np.unique(bin_idx)
-        
-        # choose highest scoring pixel coordinate per sub-interval
-        fobs = np.zeros((unique_bins.shape[0], 2), dtype=np.int64)
-        for idx, binn in enumerate(unique_bins):
-            binned_pixels = best_pts_scores[np.argwhere(bin_idx == binn)].reshape(-1,3)
-            fobs[idx] = binned_pixels[np.argmax(binned_pixels[:,-1]), :2]
-
-        return fobs
-        
-        
-        
-    def comp_pixel_score(self, 
-                         pixel_idx, 
-                         kde_arr, 
-                         pre_fobs):
+    def compute_new_obs(self, 
+                     pixel_idx, 
+                     kde_arr, 
+                     pre_fobs):
         '''
         This function computes the scores for all the pixels which have had a large enough density
         on the kernel density estimate from the optimal posterior curves. It also scores pixels 
@@ -594,19 +561,18 @@ class GP_Edge_Tracing(object):
         pixel_candidates = np.concatenate([old_fobs, pixel_idx], axis=0)
         intersection_vals = np.concatenate([old_int_vals, new_int_vals], axis=0)   
         grad_vals = np.concatenate([old_grad_vals, new_grad_vals], axis=0)    
-        #pixel_candidates = pixel_idx
-        #intersection_vals = new_int_vals
-        #grad_vals = new_grad_vals
         
         # Compute score for each pixel based on KDE's of image gradient and posterior curves. 
         pixel_scores = 1/3 * (intersection_vals * grad_vals + intersection_vals + grad_vals)
         
         # Initialise number of new pixels. If the new set of pixel coordinates is smaller 
-        # than the previous set (or is too small for first iteration) reduce score and try
-        # find more pixel coordinates with lower score.
+        # than the previous set, or too small for first iteration, reduce score and try
+        # find more pixel coordinates with lower score. This check is ignored when there
+        # aren't anymore pixels to be found to satisfy the self.pixel_thresh, i.e. when
+        # N_pixels < self.N_subints - self.pixel_thresh + 1
         N_pixels = N_pixels_pre
         i = 0
-        while N_pixels - N_pixels_pre < self.pixel_thresh:
+        while (N_pixels - N_pixels_pre < self.pixel_thresh) and (N_pixels < self.algo_thresh):
             
             # Threshold pixel scores according to threshold
             reduce_score_flag = int(i == 0)
@@ -618,12 +584,20 @@ class GP_Edge_Tracing(object):
             best_pixels = pixel_candidates[best_mask].reshape(-1,2)
             best_scores = pixel_scores[best_mask].reshape(-1,1)
             best_pts_scores = np.concatenate((best_pixels[:,[1,0]], best_scores), axis=1)
-
-            # Bin best points into sub-intervals of length delta_x and choose highest scoring point 
-            # per sub-interval. This performs the binning and non-max suppression procedure.
-            fobs = self.bin_pts(best_pts_scores)
-            N_pixels = fobs.shape[0]
+            
+            # Check new number of coordinates before binning
+            shift_best_x = (best_pts_scores[:,0]-self.x_st)
+            bin_idx = np.round(shift_best_x / self.delta_x).astype(int)
+            unique_bins = np.unique(bin_idx)
+            N_pixels = unique_bins.shape[0]
             i += 1
+                        
+        # Bin best points into sub-intervals of length delta_x and choose highest scoring point 
+        # per sub-interval. This performs the binning and non-max suppression procedure.
+        fobs = np.zeros((N_pixels, 2), dtype=np.int64)
+        for idx, bin_x in enumerate(unique_bins):
+            binned_pixels = best_pts_scores[bin_idx == bin_x].reshape(-1,3)
+            fobs[idx] = binned_pixels[np.argmax(binned_pixels[:,-1]), :2]
                                    
         return fobs   
 
@@ -663,10 +637,11 @@ class GP_Edge_Tracing(object):
         # If fixing endpoints, then assume endpoints are true estimates of the edge and don't accept
         # any new pixels for these columns.
         if self.fix_endpoints:
-            pixel_idx = pixel_idx[(pixel_idx[:,1] > self.x_st) & (pixel_idx[:,1] < self.x_en)]
+            pixel_idx = pixel_idx[(pixel_idx[:,1] > self.x_st+self.delta_x) & 
+                                  (pixel_idx[:,1] < self.x_en-self.delta_x)]
 
         # Compute pixel score and threshold pixels using score_thresh
-        fobs = self.comp_pixel_score(pixel_idx, kde_arr, pre_fobs)
+        fobs = self.compute_new_obs(pixel_idx, kde_arr, pre_fobs)
 
         return fobs
   
@@ -713,7 +688,7 @@ class GP_Edge_Tracing(object):
         # Overlay initial endpoints and observations, if any
         ax.scatter(self.init[:, 0], 
                    self.init[:,1], 
-                   c='m', s=5*fontsize, zorder=5, edgecolors=(0, 0, 0), label='Edge Endpoints')
+                   c='m', s=5*fontsize, zorder=5, edgecolors=(0, 0, 0), label='Edge Inits')
         if obs.size > 0:
             ax.scatter(obs[:,0], 
                        obs[:,1], 
@@ -753,12 +728,12 @@ class GP_Edge_Tracing(object):
         # Plot the most optimal curves from each iteration
         N_iter = len(iter_optimal_curves)
         fig, (ax1, ax2) = plt.subplots(2,1,figsize=(20,25))
-        ax1.imshow(self.grad_img, cmap='gray')
+        ax1.imshow(self.grad_img, cmap='gray', zorder=0)
         for i, curve in enumerate(iter_optimal_curves[:-1]):
-            ax1.plot(self.x_grid, curve[:,1], '--', alpha=0.25, label='Iteration {}'.format(i+1))
-        ax1.plot(self.x_grid, iter_optimal_curves[-1][:,1], '-', label='Final Edge')
+            ax1.plot(self.x_grid, curve[:,1], '--', alpha=0.25, zorder=2, label='Iteration {}'.format(i+1))
+        ax1.plot(self.x_grid, iter_optimal_curves[-1][:,1], '-', label='Final Edge', zorder=3)
         if credint is not None:
-            ax1.fill_between(self.x_grid, credint[0], credint[1], alpha=0.5, 
+            ax1.fill_between(self.x_grid, credint[0], credint[1], alpha=0.2, 
                          color='m', zorder=1, label='95% Credible Region')
         ax1.legend(loc='best', bbox_to_anchor=(1.05, 1.0))
         ax1.set_title('Most optimal curves of each iteration superimposed onto gradient image', fontsize=18)
@@ -826,8 +801,8 @@ class GP_Edge_Tracing(object):
         # Convergence of the algorithm is when there is an observation fitted for each sub-interval. 
         # In this implementation, due to delta_x, I've set the While loop to stop when there is an 
         # observation fitted for all sub-intervals bar one.
-        N_iter = 1
-        while n_fobs < self.N_subints-(self.pixel_thresh-1):
+        N_iter = 0
+        while n_fobs < self.algo_thresh:
             # Start timer for iteration
             st = t.time()
 
@@ -837,7 +812,7 @@ class GP_Edge_Tracing(object):
 
             # Intiialise Gaussian process by fitting initial points, outputting samples drawn from initial posterior 
             # distribution 
-            y_samples = self.fit_predict_GP(pre_fobs, converged=False, seed=self.seed+N_iter)
+            y_samples = self.fit_predict_GP(pre_fobs, converged=False, seed=self.seed+N_iter+1)
             
             # Plot posterior curves if show_post_iter == True 
             if show_post_iter:
@@ -866,15 +841,12 @@ class GP_Edge_Tracing(object):
             # If verbose, print out number of observations 
             if verbose:
                 print(f'Number of observations: {n_fobs}')
-                print(f'Iteration {N_iter} - Time Elapsed: {round(en-st, 4)}\n\n')
+                print(f'Iteration {N_iter + 1} - Time Elapsed: {round(en-st, 4)}\n\n')
 
         # Once condition above is met, we optimise the observation noise and kernel hyperparameters by maximising 
         # the marginal likelihood of the training set of pixel coordinates. 
         output = self.fit_predict_GP(pre_fobs, converged=True, seed=self.seed+N_iter)
-        y_mean_optim_std, y_std = output
-        
-        # Need to transform targets back to original range and dispersion across image
-        y_mean_optim = y_mean_optim_std * self.std_y_ + self.y_mean
+        y_mean_optim, y_std = output
         cred_interval = (y_mean_optim - 1.96*y_std, y_mean_optim + 1.96*y_std)
         # Note, this optimisation doesn't take into account the optimisation of these pixel coordinates being edge coordinates 
         # of the edge of interest however. Future improvements should include this. 
