@@ -1,8 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from scipy.ndimage import convolve, median_filter, gaussian_filter
-from scipy.ndimage.filters import minimum_filter
+from scipy.ndimage import convolve, median_filter, gaussian_filter, minimum_filter
 from skimage.util import random_noise
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity, normalized_root_mse
 from skimage.measure import shannon_entropy
