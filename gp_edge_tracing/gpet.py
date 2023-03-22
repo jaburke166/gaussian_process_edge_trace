@@ -27,12 +27,12 @@ class GP_Edge_Tracing(object):
                  obs=np.array([], dtype=np.int8),
                  N_samples=500, 
                  score_thresh=1, 
-                 delta_x=10, 
+                 delta_x=20, 
                  keep_ratio=0.1, 
-                 pixel_thresh=2,
+                 pixel_thresh=5,
                  seed=42,
                  return_std=False, 
-                 fix_endpoints=False):
+                 fix_endpoints=True):
         '''
         Internal parameters of the edge tracing algorithm.
         
@@ -60,7 +60,7 @@ class GP_Edge_Tracing(object):
                 of paper)). Otherwise, this parameter is used in the recursive Bayesian scheme to converge 
                 posterior predictive distribution to edge of interest.
 
-            N_sample (int, default 1000) : Number of posterior curves to sample from the Gaussian 
+            N_sample (int, default 500) : Number of posterior curves to sample from the Gaussian 
                 process in each iteration. 
 
             score_thresh (float, default 1) : Initial pixel score to determine which observations to 
@@ -69,14 +69,20 @@ class GP_Edge_Tracing(object):
             delta_x (int, default 5) : Length of sub-intervals to split horizontal, $x$-axis during 
                 search for edge pixels. Number of subintervals=N//delta_x, where $N$ is the width of the 
                 image. Algorithm terminates after N//delta_x are located and fitted to Gaussian process.
+                
+                This chooses your sampling interval, so that you require one edge pixel per sub-interval. 
+                As such, depending on the known properties of the edge of interest, you could be guided by
+                the Nyquist theorem, i.e. sampling interval is twice the highest frequency, so as to recover
+                the edge.
 
             keep_ratio (float, default 0.1) : Proportion of posterior curves, coined as optimal, 
                 to use to score pixels and select new observations for next iteration. Value must be in (0, 1].
                 
-            pixel_thresh (int, default 2) : Threshold to reduce score threshold if number of new pixel candidates 
-                doesn't exceed the previous number of pixel candidates + pixel_thresh.
+            pixel_thresh (int, default 5) : Number of additional pixel candidates to select per iteration - this
+                value acts as a threshold to reduce score_thresh if the total number of new pixel candidates 
+                doesn't exceed the previous number of pixel candidates + pixel_thresh, i.e. N_{i+1} >= N_{i}+pixel_thresh
 
-            seed (int, default 1) : Integer to fix random sampling of posterior curves from Gaussian Process
+            seed (int, default 42) : Integer to fix random sampling of posterior curves from Gaussian Process
                 in each iteration.   
             
             return_std (bool, default False) : If flagged, return 95% credible interval as well as edge trace.
@@ -86,10 +92,10 @@ class GP_Edge_Tracing(object):
         '''
         
         # Set global internal parameters
-        self.init = init.astype(int)
+        self.init = init[np.argsort(init[:,0])].astype(int)
         self.x_st, self.x_en = int(init[0,0]), int(init[-1,0])
         self.grad_img = gpet_utils.normalise(grad_img, minmax_val=(0,1), astyp=np.float64)
-        self.noise_y = 100 * noise_y
+        self.noise_y = noise_y
         self.N_samples = int(N_samples) if N_samples > 100 else 1000
         self.obs = obs.reshape(-1,2).astype(np.int64)
         self.seed = seed
@@ -117,46 +123,46 @@ class GP_Edge_Tracing(object):
                                                                 np.arange(self.N), 
                                                                 self.grad_img, 
                                                                 kx=1, ky=1)
-        #self.grad_interp = self.grad_interpolation()
+        #self.grad_interp = self.grad_interpolation(this takes too long and has been removed)
         self.grad_kde = self.kernel_density_estimate(best_curves=None, costs=None)
         
-        # Set up check for kernel, function variance and length scale
+        # If kernel_options is dictionary, then specific kernel has been chosen
         if type(kernel_options) == dict:
-            self.sigma_f = kernel_options['sigma_f']
+            self.sigma_f = kernel_options['sigma_f']            
             self.sigma_l = kernel_options['length_scale']
             self.kernel_type = kernel_options['kernel']
             self.kernel_nu = kernel_options['nu'] if kernel_options['kernel']=='Matern' else 2.5
+            
+        # RBF or Matern
+          # if rbf_matern = 0 we use RBF kernel, 
+          # if rbf_matern = 1, we use Matern kernel with nu = 2.5 (smoother curves, higher degree of differentiability)
+          # if rbf_matern >= 2, we use Matern kernel with nu = 1.5 (bumpy curves, lower degree of differentiability)  
         else:
             rbf_matern, sigmaf_opt, sigmal_opt = kernel_options
-
-            # RBF or Matern
-            # if rbf_matern = 0 we use RBF kernel, 
-            # if rbf_matern = 1, we use Matern kernel with nu = 2.5 (smoother curves, higher degree of differentiability)
-            # if rbf_matern >= 2, we use Matern kernel with nu = 1.5 (bumpy curves, lower degree of differentiability)
             self.kernel_type = ["RBF", "Matern"][int(rbf_matern > 0)]
             self.kernel_nu = [2.5, 1.5][int(rbf_matern > 1)]
             
-            # Function variance
-            sigma_f_const = [10, 8, 6, 4, 2][sigmaf_opt-1] if (sigmaf_opt >= 0) and (sigmaf_opt <= 4) else 2
-            self.sigma_f = self.M // sigma_f_const 
+            # Function variance (effective amplitude)
+            sigma_f_const = [10, 8, 6, 4, 2, 1][sigmaf_opt-1] if (sigmaf_opt >= 0) and (sigmaf_opt <= 5) else 1
+            self.sigma_f = self.M // sigma_f_const
             
-            # Lengthscale
+            # Lengthscale (effective sinuosity)
             sigma_l_const = [1, 4/3, 2, 4, 10][sigmal_opt-1] if (sigmal_opt >= 0) and (sigmal_opt <= 4) else 10
             self.sigma_l = self.edge_length // sigma_l_const    
             
         # Set up default GP parameters during fitting (before converged=True)
         self.gp_params = dict(normalize_y=True, 
-                              alpha=1e-10, 
+                              alpha=1e-6, 
                               copy_X_train=True, 
                               optimizer=None,
                               n_restarts_optimizer = 0)
         
         # Set up initial alpha
-        alpha_const = [1.0, 1e-7][int(fix_endpoints)]
-        self.alpha_init = alpha_const*np.ones((self.N_inits))
+        alpha_const = [0.5, 1e-7][int(fix_endpoints)]
+        self.alpha_init = np.array((self.N_inits)*[alpha_const])
                                    
         # Set up constant kernel
-        self.constant_kernel = skgp.kernels.ConstantKernel(self.sigma_f**2, 
+        self.constant_kernel = skgp.kernels.ConstantKernel(self.sigma_f, 
                                                            constant_value_bounds="fixed")
         
         # Set up main GP kernel (RBF or Matern)
@@ -169,14 +175,14 @@ class GP_Edge_Tracing(object):
                                                    length_scale_bounds="fixed")
             
         # Define default kernel during fitting procedure (before convergence=True)
-        self.default_kernel = self.constant_kernel * self.gp_kernel
-        
+        self.default_kernel = self.constant_kernel*self.gp_kernel
+
         
                                     
     def fit_predict_GP(self, 
                        obs, 
-                       converged=False, 
-                       seed=1):
+                       converged=False,
+                       seed=0):
         ''' 
         Fits a Gaussian Process using init and obs. The coordinates in obs are perturbed using observation 
         noise, self.noise_y. N_samples posterior curves are sampled and outputted (and can be fixed using seed). 
@@ -189,7 +195,7 @@ class GP_Edge_Tracing(object):
                 then converged=True and we optimise model by minimising the log marginal likelihood, 
                 outputting mean function and 95% credible interval to user.
             
-            seed (int, default 1) : Seed to fix random posterior curve sampling.
+            seed (int, default 0) : Seed to fix random posterior curve sampling.
             
         RETURNS:
         -------------------
@@ -199,10 +205,13 @@ class GP_Edge_Tracing(object):
             y_mean, y_std (np.array, np.array) : Outputted when converged=True. Mean and standard deviation of 
                 the posterior distribution of the Gaussian process.
         '''
-        # Construct inputs and outputs, depending on if endpoints are fixed and if we've converged
+        # Construct inputs and outputs, alongside observations noise
         alpha_obs = np.ones((obs.shape[0])) 
         alpha = np.concatenate([self.alpha_init, alpha_obs], axis=0)
-        new_obs = np.concatenate([self.init, obs], axis=0)   
+        new_obs = np.concatenate([self.init, obs], axis=0) 
+        sort_obs = np.argsort(new_obs[:,0])
+        alpha = alpha[sort_obs]
+        new_obs = new_obs[sort_obs]
         
         # Set up elements of kernel and optimisation parameters for GPR
         self.gp_params["random_state"] = seed
@@ -214,26 +223,34 @@ class GP_Edge_Tracing(object):
         X = new_obs[:,0][:, np.newaxis].astype(np.float64)
         y = new_obs[:,1].astype(np.float64)
         
-        # Depending on whether edge tracer has converged, setup fitting scheme for kernel parameters
+        # Depending on whether edge tracer has converged, setup fitting scheme for kernel hyperparameters
         if not converged:
-            iter_kernel = self.default_kernel + noise_kernel
-        else:
-            #self.gp_params['optimizer'] = 'fmin_l_bfgs_b'
-            #self.gp_params['n_restarts_optimizer'] = 25
-            #self.gp_kernel.length_scale_bounds = (1e-3*self.sigma_l, 1e3*self.sigma_l)
-            #self.constant_kernel.constant_value_bounds = (1e-3*self.sigma_f, 1e3*self.sigma_f)
-            #noise_kernel.noise_level_bounds = (1e-12, self.noise_y)
-            iter_kernel = self.constant_kernel * self.gp_kernel + noise_kernel
+            y_s = np.std(y)+1
+            y /= y_s
+            self.constant_kernel.constant_value = self.sigma_f**2/y_s**2
             
-            # Standardise y to improve conditioning for optimiser
-            #y_m, y_s = np.mean(y), np.std(y)
-            #y  = y / y_s
+        else:            
+            # Standardise y to improve conditioning for optimiser. We store the statistics
+            # so that during prediction we transform back.
+            y_m, y_s = np.mean(y), np.std(y)
+            y  = (y-y_m) / y_s
+            X_m, X_s = np.mean(X), np.std(X)
+            X = (X-X_m) / X_s
             
-            # Standardise X to improve conditioning for optimiser
-            #X_m, X_s = np.mean(X), np.std(X)
-            #X = (X-X_m) / X_s
-
-        # Construct Gaussian process regressor and fit data to the GP to update mean and covar matrix
+            # Set up GP model fitting parameters
+            self.gp_params['optimizer'] = 'fmin_l_bfgs_b'
+            self.gp_params['n_restarts_optimizer'] = 12
+            self.gp_params["normalize_y"] = False
+            self.constant_kernel.constant_value = 5.0
+            self.gp_kernel.length_scale = 5.0
+            self.gp_kernel.length_scale_bounds = (0.1, 100)
+            self.constant_kernel.constant_value_bounds = (0.01, 1e3)
+            noise_kernel.noise_level_bounds = (1e-18, 1) 
+            
+            #return (X,y), (X_m, X_s), (y_m, y_s)
+            
+        # Construct Gaussian process regressor and fit data to the GP to update mean and covariance matrix
+        iter_kernel = self.constant_kernel*self.gp_kernel + noise_kernel
         self.gp_params['kernel'] = iter_kernel
         gp = sklearn_gpr.GaussianProcessRegressor(**self.gp_params)
         gp.fit(X, y)
@@ -241,13 +258,12 @@ class GP_Edge_Tracing(object):
         # Sample posterior curves
         if not converged:
             y_samples = gp.sample_y(self.x_grid[:, np.newaxis], self.N_samples, random_state=seed)
-            outputs = y_samples
+            outputs = y_samples*y_s
         else:
             # Predict using standardised inputs
-            #x_m, x_s = np.mean(self.x_grid), np.std(self.x_grid)
-            #x_grid_std = (self.x_grid - X_m) / x_s
-            y_mean, y_std = gp.predict(self.x_grid[:, np.newaxis], return_std=True)
-            outputs = (y_mean, y_std)
+            x_grid_std = (self.x_grid - X_m) / X_s
+            y_mean, y_std = gp.predict(x_grid_std[:, np.newaxis], return_std=True)
+            outputs = (y_s*y_mean+y_m, y_std) 
 
         return outputs
     
@@ -373,7 +389,7 @@ class GP_Edge_Tracing(object):
         '''
         # Evaluate edge along interpolated gradient image
         edge = edge[edge[:,0].argsort(), :]
-        grad_score = self.grad_interp(edge[:,1], edge[:,0], grid=False)
+        grad_score = self.grad_interp(edge[:,1], edge[:,0], grid=False)+self.kde_thresh
         #grad_score = self.grad_interp(edge[:,0], edge[:,1])
 
         # Compute cumulative sum of euclidean distance between pixel indexes of edge.
@@ -637,8 +653,8 @@ class GP_Edge_Tracing(object):
         # If fixing endpoints, then assume endpoints are true estimates of the edge and don't accept
         # any new pixels for these columns.
         if self.fix_endpoints:
-            pixel_idx = pixel_idx[(pixel_idx[:,1] > self.x_st+self.delta_x) & 
-                                  (pixel_idx[:,1] < self.x_en-self.delta_x)]
+            pixel_idx = pixel_idx[(pixel_idx[:,1] > self.x_st) & 
+                                  (pixel_idx[:,1] < self.x_en)]
 
         # Compute pixel score and threshold pixels using score_thresh
         fobs = self.compute_new_obs(pixel_idx, kde_arr, pre_fobs)
@@ -728,7 +744,7 @@ class GP_Edge_Tracing(object):
         # Plot the most optimal curves from each iteration
         N_iter = len(iter_optimal_curves)
         fig, (ax1, ax2) = plt.subplots(2,1,figsize=(20,25))
-        ax1.imshow(self.grad_img, cmap='gray', zorder=0)
+        ax1.imshow(self.grad_img, cmap='jet', zorder=0)
         for i, curve in enumerate(iter_optimal_curves[:-1]):
             ax1.plot(self.x_grid, curve[:,1], '--', alpha=0.25, zorder=2, label='Iteration {}'.format(i+1))
         ax1.plot(self.x_grid, iter_optimal_curves[-1][:,1], '-', label='Final Edge', zorder=3)
@@ -846,6 +862,7 @@ class GP_Edge_Tracing(object):
         # Once condition above is met, we optimise the observation noise and kernel hyperparameters by maximising 
         # the marginal likelihood of the training set of pixel coordinates. 
         output = self.fit_predict_GP(pre_fobs, converged=True, seed=self.seed+N_iter)
+        #return output
         y_mean_optim, y_std = output
         cred_interval = (y_mean_optim - 1.96*y_std, y_mean_optim + 1.96*y_std)
         # Note, this optimisation doesn't take into account the optimisation of these pixel coordinates being edge coordinates 
