@@ -220,15 +220,24 @@ class GaussianProcessRegressor(MultiOutputMixin, RegressorMixin, BaseEstimator):
         # Normalize target value
         if self.normalize_y:
             self._y_train_mean = np.mean(y, axis=0)
-            self._y_train_std = 1 #_handle_zeros_in_scale(np.std(y, axis=0), copy=False)
+            self._y_train_std = _handle_zeros_in_scale(np.std(y, axis=0), copy=False)
 
+        ######### edited from here
             # Remove mean but DO NOT SCALE
             y = (y - self._y_train_mean) #/ self._y_train_std
-
+            
         else:
-            shape_y_stats = (y.shape[1],) if y.ndim == 2 else 1
-            self._y_train_mean = np.zeros(shape=shape_y_stats)
-            self._y_train_std = np.ones(shape=shape_y_stats)
+            self._y_train_mean = np.mean(y, axis=0)
+            self._y_train_std = _handle_zeros_in_scale(np.std(y, axis=0), copy=False)
+
+            # Remove mean and scale
+            y = (y - self._y_train_mean) / self._y_train_std
+        
+        #else:
+        #    shape_y_stats = (y.shape[1],) if y.ndim == 2 else 1
+        #    self._y_train_mean = np.zeros(shape=shape_y_stats)
+        #    self._y_train_std = np.ones(shape=shape_y_stats)
+        ######### to here   
 
         if np.iterable(self.alpha) and self.alpha.shape[0] != y.shape[0]:
             if self.alpha.shape[0] == 1:
@@ -584,7 +593,11 @@ class GaussianProcessRegressor(MultiOutputMixin, RegressorMixin, BaseEstimator):
                 jac=True,
                 bounds=bounds,
             )
-            _check_optimize_result("lbfgs", opt_res)
+            #16/03/2022 Removed this check
+            # I don't need convergence, I just need an approximate mean function to
+            # interpolate through the detected edge pixels.
+            #_check_optimize_result("lbfgs", opt_res, max_iter=1e24)
+            
             theta_opt, func_min = opt_res.x, opt_res.fun
         elif callable(self.optimizer):
             theta_opt, func_min = self.optimizer(obj_func, initial_theta, bounds=bounds)
