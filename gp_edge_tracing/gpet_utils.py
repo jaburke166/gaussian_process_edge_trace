@@ -144,6 +144,9 @@ def denoise(image, technique, kwargs, plot=False, verbose=False):
         denoised_img = gaussian_filter(image, **kwargs)
     elif technique == 'minimum':
         denoised_img = minimum_filter(image, **kwargs)
+    else:
+        print("Denoising technique not implemented.")
+        denoised_img = None
 
     if verbose:
         psnr = round(peak_signal_noise_ratio(image, denoised_img),2)
