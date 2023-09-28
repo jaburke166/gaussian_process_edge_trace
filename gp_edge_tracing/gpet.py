@@ -769,7 +769,8 @@ class GP_Edge_Tracing(object):
                  print_final_diagnostics=False, 
                  show_init_post=False, 
                  show_post_iter=False, 
-                 verbose=False):
+                 verbose=False,
+                 return_lines=False):
         '''
         Call function that runs the Gaussian process edge tracing algorithm.
 
@@ -788,15 +789,22 @@ class GP_Edge_Tracing(object):
             verbose (bool, default False) : If flagged, output text updating user on time/iter, 
                 number of observations/iter and any adaptive score threshold reduction.
                 
+            return_lines (bool, default False) : If flagged, return samples and observations per iteration.
+                
         RETURNS:
         ---------------
             edge_trace (np.array, dtype=np.int) : Predicted edge in yx-pixel space.
             
             cred_interval (np.array, dtype=np.float64) : 95% credible interval of predicted edge trace.
         '''
+        # Empty lists to collect samples and observations
+        all_samples = []
+        all_obs = [self.obs]
+        
         # Plot random samples drawn from Gaussian process with chosen kernel and ask to continue with algorithm.   
         if show_init_post:
             y_samples = self.fit_predict_GP(self.obs, converged=False, seed=0)
+            all_samples.append(y_samples)
             self.plot_iter(y_samples, 20, self.obs)
             print('Are you happy with your choice of kernel? y/n')
             cont = input()
@@ -813,7 +821,7 @@ class GP_Edge_Tracing(object):
         n_fobs = pre_fobs.shape[0]
         iter_optimal_curves = []
         iter_optimal_costs = []
-
+        
         # Convergence of the algorithm is when there is an observation fitted for each sub-interval. 
         # In this implementation, due to delta_x, I've set the While loop to stop when there is an 
         # observation fitted for all sub-intervals bar one.
@@ -829,6 +837,7 @@ class GP_Edge_Tracing(object):
             # Intiialise Gaussian process by fitting initial points, outputting samples drawn from initial posterior 
             # distribution 
             y_samples = self.fit_predict_GP(pre_fobs, converged=False, seed=self.seed+N_iter+1)
+            all_samples.append(y_samples)
             
             # Plot posterior curves if show_post_iter == True 
             if show_post_iter:
@@ -846,6 +855,7 @@ class GP_Edge_Tracing(object):
             # Scores are computed using the image gradient and optimal posterior curves. We make sure to have
             # at least 1 *more* pixel fitted in consecutive iterations by reducing score threshold by 5% if necessary
             pre_fobs = self.get_best_pixels(best_curves, best_costs, pre_fobs[:,[1,0]])
+            all_obs.append(pre_fobs)
             
             # Recompute number of observations
             n_fobs = pre_fobs.shape[0]
@@ -862,22 +872,27 @@ class GP_Edge_Tracing(object):
         # Once condition above is met, we optimise the observation noise and kernel hyperparameters by maximising 
         # the marginal likelihood of the training set of pixel coordinates. 
         output = self.fit_predict_GP(pre_fobs, converged=True, seed=self.seed+N_iter)
-        #return output
         y_mean_optim, y_std = output
         cred_interval = (y_mean_optim - 1.96*y_std, y_mean_optim + 1.96*y_std)
         # Note, this optimisation doesn't take into account the optimisation of these pixel coordinates being edge coordinates 
         # of the edge of interest however. Future improvements should include this. 
+        
+        # Append final, mean curve and all observations detected to sample lists
+        all_samples.append(y_mean_optim)
+        all_obs.append(pre_fobs)
             
         # Compute predicted edge by converting mean function to pixel coordinates
         optim_mean_curve = np.concatenate([self.x_grid[:,np.newaxis], y_mean_optim[:, np.newaxis]], axis=1)
         edge_trace = np.rint(optim_mean_curve[:, [1,0]]).astype(int)
 
+        # Append final curve and cost to iteration lists
+        iter_optimal_curves.append(edge_trace[:, [1,0]])
+        iter_optimal_costs.append(self.cost_funct(optim_mean_curve))
+        
         # Print diagnostics 
         if print_final_diagnostics:
-            iter_optimal_curves.append(edge_trace[:, [1,0]])
-            iter_optimal_costs.append(self.cost_funct(optim_mean_curve))
             self.plot_diagnostics(iter_optimal_curves, iter_optimal_costs, cred_interval)
-
+            
         # Compute and print time elapsed
         alg_en = t.time()
         if verbose:
@@ -887,4 +902,7 @@ class GP_Edge_Tracing(object):
         if self.return_std:
             return edge_trace, cred_interval
         else:
-            return edge_trace
+            if not return_lines: 
+                return edge_trace
+            else:
+                return edge_trace, (all_samples, all_obs, iter_optimal_curves)
